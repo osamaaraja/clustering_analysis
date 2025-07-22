@@ -878,7 +878,7 @@ def run_fisher_test_agglomerative_dtw_tslearn(
 # AGGLOMERATIVE (BINARY DISTANCES: HAMMING / JACCARD / DICE)
 # -----------------------------------------------------------------------------
 
-def _build_binary_dataset(
+def build_binary_dataset(
     filtered_df: pd.DataFrame,
     id_col: str = "hadm_id",
     item_col: str = "itemid",
