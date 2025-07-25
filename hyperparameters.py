@@ -21,4 +21,10 @@ RUN_FLAGS = {
     "DBSCAN_EU": False,
     "DBSCAN_DTW": False,
     "SPECTRAL": False,
+    "KMEDOIDS_EUCLID": True,
+    "KMEDOIDS_MANHATTAN": False,
+    "KMEDOIDS_MAHALANOBIS": False,
+    "KMEDOIDS_COSINE": False,
+    "KMEDOIDS_DTW_FAST": False,
+    "KMEDOIDS_DTW_TS": False,
 }
