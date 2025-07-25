@@ -26,8 +26,7 @@ from hmmlearn import hmm
 from sklearn.cluster import SpectralClustering
 from dataclasses import dataclass 
 from typing import Iterable, List, Dict
-
-#from sklearn_extra.cluster import KMedoids
+from sklearn_extra.cluster import KMedoids
 
 
 
