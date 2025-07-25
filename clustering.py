@@ -1284,4 +1284,131 @@ def run_fisher_test_spectral(
     })
 
 
+@dataclass
+class KMedoidsMetricsRow:
+    k: int
+    silhouette: float
+    calinski_harabasz: float
+    davies_bouldin: float
 
+def run_kmedoids_metrics(
+    df_features: pd.DataFrame,
+    id_vars: Iterable[str],
+    k_values: Iterable[int] = range(2, 16),
+    metric: str = "euclidean",
+    precomputed: bool = False,
+    dist_matrix: np.ndarray | None = None,
+    random_state: int = 42,
+    logger: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """
+    Run KMedoids for each k and return a metrics DataFrame.
+    If `precomputed` is True, you must pass a square `dist_matrix`.
+    Otherwise it will call KMedoids(metric=metric) on the feature matrix.
+    """
+    log = logger or logging.getLogger("MAIN")
+
+    # pick X or D
+    if precomputed:
+        if dist_matrix is None:
+            raise ValueError("dist_matrix must be provided when precomputed=True")
+        D = dist_matrix
+        use_pre = True
+    else:
+        # build feature matrix
+        feature_cols = [c for c in df_features.columns if c not in id_vars]
+        X = df_features[feature_cols].values
+        use_pre = False
+
+    rows: List[KMedoidsMetricsRow] = []
+    for k in k_values:
+        log.info("KMedoids (%s) clustering with k=%d ...", metric, k)
+        if use_pre:
+            model = KMedoids(n_clusters=k,
+                             metric="precomputed",
+                             random_state=random_state)
+            labels = model.fit_predict(D)
+            # silhouette over the precomputed matrix:
+            sil = silhouette_score(D, labels, metric="precomputed") if len(np.unique(labels))>1 else np.nan
+            # for CH/DB use the X from df_for_space:
+        else:
+            model = KMedoids(n_clusters=k,
+                             metric=metric,
+                             random_state=random_state)
+            labels = model.fit_predict(X)
+            sil = silhouette_score(X, labels) if len(np.unique(labels))>1 else np.nan
+
+        # calinski & davies always on X
+        if use_pre:
+            feature_cols = [c for c in df_features.columns if c not in id_vars]
+            X_ch = df_features[feature_cols].values
+        else:
+            X_ch = X
+
+        if len(np.unique(labels))>1:
+            ch = calinski_harabasz_score(X_ch, labels)
+            db = davies_bouldin_score(X_ch, labels)
+        else:
+            ch = db = np.nan
+
+        rows.append(
+            KMedoidsMetricsRow(
+                k=k,
+                silhouette=sil,
+                calinski_harabasz=ch,
+                davies_bouldin=db,
+            )
+        )
+
+    return pd.DataFrame([r.__dict__ for r in rows])
+
+def run_fisher_test_kmedoids(
+    df_features: pd.DataFrame,
+    id_vars: Iterable[str],
+    k: int,
+    outcome_df: pd.DataFrame,
+    outcome_col: str = "target",
+    metric: str = "euclidean",
+    precomputed: bool = False,
+    dist_matrix: np.ndarray | None = None,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """
+    Fisher’s test for KMedoids clusters.
+    If precomputed=True, must pass dist_matrix; else uses metric on df_features.
+    """
+    # fit exactly as above
+    if precomputed:
+        if dist_matrix is None:
+            raise ValueError("need dist_matrix for precomputed")
+        model = KMedoids(n_clusters=k, metric="precomputed", random_state=random_state)
+        labels = model.fit_predict(dist_matrix)
+    else:
+        feature_cols = [c for c in df_features.columns if c not in id_vars]
+        X = df_features[feature_cols].values
+        model = KMedoids(n_clusters=k, metric=metric, random_state=random_state)
+        labels = model.fit_predict(X)
+
+    merged = (
+        pd.DataFrame({"hadm_id": df_features["hadm_id"].values, "cluster": labels})
+        .merge(outcome_df[["hadm_id", outcome_col]], on="hadm_id", how="left")
+        .dropna(subset=[outcome_col])
+    )
+
+    p_vals, clusters = [], np.unique(labels)
+    for cid in clusters:
+        in_c = merged["cluster"] == cid
+        a = (merged.loc[in_c, outcome_col] == 1).sum()
+        b = (merged.loc[~in_c, outcome_col] == 1).sum()
+        c = (merged.loc[in_c, outcome_col] == 0).sum()
+        d = (merged.loc[~in_c, outcome_col] == 0).sum()
+        _, p = fisher_exact([[a, b], [c, d]], alternative="greater")
+        p_vals.append(p)
+
+    rej, p_corr, *_ = multipletests(p_vals, method="bonferroni")
+    return pd.DataFrame({
+        "Cluster": clusters,
+        "Raw_p_value": p_vals,
+        "Corrected_p_value": p_corr,
+        "Significant_after_correction": rej
+    })
