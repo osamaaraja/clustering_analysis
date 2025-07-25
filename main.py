@@ -3,6 +3,8 @@ import utils
 from imports import *
 from clustering import *
 
+dtw_ts = None
+
 utils.configure_logging()
 logger = logging.getLogger('MAIN')
 
@@ -219,36 +221,6 @@ if utils.should_run("AGG_DTW_FAST", RUN_ALL, RUN_FLAGS):
 else:
     metrics_df_agg_dtw = dtw_mat = top_clust_agg_dtw = all_fisher_agg_dtw = None
 
-
-# ------------------- AGGLO DTW (tslearn) --------------------
-if utils.should_run("AGG_DTW_TS", RUN_ALL, RUN_FLAGS):
-    metrics_df_agg_dtw_ts, dtw_ts = run_agglomerative_metrics_dtw_tslearn(
-        df_features=imputed_preprocessed,
-        id_vars=id_vars,
-        n_timesteps=days,
-        k_values=K_RANGE,
-        df_for_space=imputed_preprocessed,
-        logger=logger
-    )
-    utils.plot_and_save_kmeans_metrics(metrics_df_agg_dtw_ts, filename=f"agg_metrics_{PCT_LABEL}_dtw_tslearn.png")
-
-    top_clust_agg_dtw_ts = get_top_clusters_with_threshold(metrics_df_agg_dtw_ts, SIL_THR, logger=logger)
-
-    all_fisher_agg_dtw_ts = utils.run_fisher_loop_precomputed(
-        top_clusters=top_clust_agg_dtw_ts,
-        fisher_fn=run_fisher_test_agglomerative_dtw_tslearn,
-        base_kwargs=dict(outcome_df=cohort_data, outcome_col="target"),
-        dist_matrix=dtw_ts,
-        df_ids=imputed_preprocessed[id_vars],
-        logger=logger,
-        method_label=f"Agglo-DTW-tslearn-{PCT_LABEL}",
-        dist_arg_name="dtw_matrix",
-        ids_arg_name="df_ids"
-    )
-else:
-    metrics_df_agg_dtw_ts = dtw_ts = top_clust_agg_dtw_ts = all_fisher_agg_dtw_ts = None
-
-
 # ------------------- BINARY (Hamming/Jaccard/Dice) --------------------
 if utils.should_run("BINARY", RUN_ALL, RUN_FLAGS):
     binary_dataset = build_binary_dataset(filtered_common_labs_percent, id_col="hadm_id", item_col="itemid")
@@ -358,3 +330,220 @@ if utils.should_run("SPECTRAL", RUN_ALL, RUN_FLAGS):
     )
 else:
     hmm_feats = ids_df = metrics_df_spec = top_clust_spec = all_fisher_spec = None
+
+#---------------------------------------------------------------------------------------#
+# ------------------- K‑MEDOIDS EUCLIDEAN --------------------
+if utils.should_run("KMEDOIDS_EUCLID", RUN_ALL, RUN_FLAGS):
+    metrics_kmed_eu = run_kmedoids_metrics(
+        imputed_preprocessed, id_vars,
+        k_values=K_RANGE,
+        metric="euclidean", precomputed=False,
+        logger=logger
+    )
+    utils.plot_and_save_kmeans_metrics(
+        metrics_kmed_eu,
+        filename=f"kmedoids_metrics_{PCT_LABEL}_euclid.png"
+    )
+    top_kmed_eu = get_top_clusters_with_threshold(metrics_kmed_eu, SIL_THR, logger=logger)
+    all_fisher_kmed_eu = utils.run_fisher_loop(
+        top_clusters=top_kmed_eu,
+        fisher_fn=run_fisher_test_kmedoids,
+        base_kwargs=dict(
+            df_features=imputed_preprocessed,
+            id_vars=id_vars,
+            outcome_df=cohort_data,
+            outcome_col="target",
+            metric="euclidean",
+            precomputed=False,
+            random_state=42
+        ),
+        logger=logger,
+        method_label=f"KMedoids-EU-{PCT_LABEL}"
+    )
+else:
+    metrics_kmed_eu = top_kmed_eu = all_fisher_kmed_eu = None
+
+# ------------------- K‑MEDOIDS MANHATTAN (precomputed) --------------------
+if utils.should_run("KMEDOIDS_MANHATTAN", RUN_ALL, RUN_FLAGS):
+    # first compute your manhattan dist matrix exactly as for Agglo
+    _, man_dist = run_agglomerative_metrics_manhattan(
+        df_raw=wide_df_percent,
+        id_vars=id_vars,
+        k_values=K_RANGE,
+        df_for_space=None,    # not used here
+        logger=logger
+    )
+    metrics_kmed_man = run_kmedoids_metrics(
+        imputed_preprocessed, id_vars,
+        k_values=K_RANGE,
+        metric="precomputed", precomputed=True,
+        dist_matrix=man_dist,
+        logger=logger
+    )
+    utils.plot_and_save_kmeans_metrics(metrics_kmed_man, filename=f"kmedoids_metrics_{PCT_LABEL}_manhattan.png")
+    top_kmed_man = get_top_clusters_with_threshold(metrics_kmed_man, SIL_THR, logger=logger)
+    all_fisher_kmed_man = utils.run_fisher_loop_precomputed(
+        top_clusters=top_kmed_man,
+        fisher_fn=run_fisher_test_kmedoids,
+        base_kwargs=dict(
+            outcome_df=cohort_data,
+            outcome_col="target",
+            metric="precomputed",
+            precomputed=True
+        ),
+        dist_matrix=man_dist,
+        df_ids=wide_df_percent[id_vars],
+        logger=logger,
+        method_label=f"KMedoids-MAN-{PCT_LABEL}"
+    )
+else:
+    metrics_kmed_man = dist_man = top_kmed_man = all_fisher_kmed_man = None
+
+# ------------------- K‑MEDOIDS MAHALANOBIS (precomputed) --------------------
+if utils.should_run("KMEDOIDS_MAHALANOBIS", RUN_ALL, RUN_FLAGS):
+    # uses dist_mah from your Agglo‑Mahalanobis block
+    metrics_kmed_mah = run_kmedoids_metrics(
+        imputed_preprocessed, id_vars,
+        k_values=K_RANGE,
+        metric="precomputed", precomputed=True,
+        dist_matrix=dist_mah,
+        logger=logger
+    )
+    utils.plot_and_save_kmeans_metrics(
+        metrics_kmed_mah,
+        filename=f"kmedoids_metrics_{PCT_LABEL}_mahalanobis.png"
+    )
+    top_kmed_mah = get_top_clusters_with_threshold(
+        metrics_kmed_mah, SIL_THR, logger=logger
+    )
+    all_fisher_kmed_mah = utils.run_fisher_loop_precomputed(
+        top_clusters=top_kmed_mah,
+        fisher_fn=run_fisher_test_kmedoids,
+        base_kwargs=dict(
+            outcome_df=cohort_data,
+            outcome_col="target",
+            metric="precomputed",
+            precomputed=True
+        ),
+        dist_matrix=dist_mah,
+        df_ids=wide_df_percent[id_vars],
+        logger=logger,
+        method_label=f"KMedoids‑MAH-{PCT_LABEL}"
+    )
+else:
+    metrics_kmed_mah = top_kmed_mah = all_fisher_kmed_mah = None
+
+
+# ------------------- K‑MEDOIDS COSINE (precomputed) --------------------
+if utils.should_run("KMEDOIDS_COSINE", RUN_ALL, RUN_FLAGS):
+    # uses dist_cos from your Agglo‑Cosine block
+    metrics_kmed_cos = run_kmedoids_metrics(
+        imputed_preprocessed, id_vars,
+        k_values=K_RANGE,
+        metric="precomputed", precomputed=True,
+        dist_matrix=dist_cos,
+        logger=logger
+    )
+    utils.plot_and_save_kmeans_metrics(
+        metrics_kmed_cos,
+        filename=f"kmedoids_metrics_{PCT_LABEL}_cosine.png"
+    )
+    top_kmed_cos = get_top_clusters_with_threshold(
+        metrics_kmed_cos, SIL_THR, logger=logger
+    )
+    all_fisher_kmed_cos = utils.run_fisher_loop_precomputed(
+        top_clusters=top_kmed_cos,
+        fisher_fn=run_fisher_test_kmedoids,
+        base_kwargs=dict(
+            outcome_df=cohort_data,
+            outcome_col="target",
+            metric="precomputed",
+            precomputed=True
+        ),
+        dist_matrix=dist_cos,
+        df_ids=wide_df_percent[id_vars],
+        logger=logger,
+        method_label=f"KMedoids‑COS-{PCT_LABEL}"
+    )
+else:
+    metrics_kmed_cos = top_kmed_cos = all_fisher_kmed_cos = None
+
+
+# ------------------- K‑MEDOIDS DTW (fast, dtaidistance) --------------------
+if utils.should_run("KMEDOIDS_DTW_FAST", RUN_ALL, RUN_FLAGS):
+    # uses dtw_mat from your DTW‑fast block
+    metrics_kmed_dtw, _ = run_kmedoids_metrics(
+        imputed_preprocessed, id_vars,
+        k_values=K_RANGE,
+        metric="precomputed", precomputed=True,
+        dist_matrix=dtw_mat,
+        logger=logger
+    )
+    utils.plot_and_save_kmeans_metrics(
+        metrics_kmed_dtw,
+        filename=f"kmedoids_metrics_{PCT_LABEL}_dtw.png"
+    )
+    top_kmed_dtw = get_top_clusters_with_threshold(
+        metrics_kmed_dtw, SIL_THR, logger=logger
+    )
+    all_fisher_kmed_dtw = utils.run_fisher_loop_precomputed(
+        top_clusters=top_kmed_dtw,
+        fisher_fn=run_fisher_test_kmedoids,
+        base_kwargs=dict(
+            outcome_df=cohort_data,
+            outcome_col="target",
+            metric="precomputed",
+            precomputed=True
+        ),
+        dist_matrix=dtw_mat,
+        df_ids=imputed_preprocessed[id_vars],
+        logger=logger,
+        method_label=f"KMedoids‑DTW‑FAST-{PCT_LABEL}",
+        dist_arg_name="dtw_matrix",
+        ids_arg_name="df_ids"
+    )
+else:
+    metrics_kmed_dtw = top_kmed_dtw = all_fisher_kmed_dtw = None
+
+
+# ------------------- K‑MEDOIDS DTW (tslearn) --------------------
+if utils.should_run("KMEDOIDS_DTW_TS", RUN_ALL, RUN_FLAGS):
+    # ensure dtw_ts has been computed
+    if 'dtw_ts' not in locals():
+        raise RuntimeError(
+            "K‑Medoids DTW‑TS requires the tslearn‑DTW matrix. "
+            "Enable and run AGG_DTW_TS first."
+        )
+
+    metrics_kmed_dtw_ts, _ = run_kmedoids_metrics(
+        imputed_preprocessed, id_vars,
+        k_values=K_RANGE,
+        metric="precomputed", precomputed=True,
+        dist_matrix=dtw_ts,     # now guaranteed to exist
+        logger=logger
+    )
+    utils.plot_and_save_kmeans_metrics(
+        metrics_kmed_dtw_ts,
+        filename=f"kmedoids_metrics_{PCT_LABEL}_dtw_tslearn.png"
+    )
+    top_kmed_dtw_ts = get_top_clusters_with_threshold(
+        metrics_kmed_dtw_ts, SIL_THR, logger=logger
+    )
+    all_fisher_kmed_dtw_ts = utils.run_fisher_loop_precomputed(
+        top_clusters=top_kmed_dtw_ts,
+        fisher_fn=run_fisher_test_kmedoids,
+        base_kwargs=dict(
+            outcome_df=cohort_data,
+            outcome_col="target",
+            metric="precomputed",
+            precomputed=True
+        ),
+        dist_matrix=dtw_ts,
+        df_ids=imputed_preprocessed[id_vars],
+        logger=logger,
+        method_label=f"KMedoids‑DTW‑TS-{PCT_LABEL}",
+        dist_arg_name="dtw_matrix",
+        ids_arg_name="df_ids"
+    )
+else:
+    metrics_kmed_dtw_ts = top_kmed_dtw_ts = all_fisher_kmed_dtw_ts = None
